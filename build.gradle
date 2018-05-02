@@ -1,0 +1,148 @@
+import com.seekting.gradle.unitls.LogSupportExtension
+
+import java.util.regex.Matcher
+import java.util.regex.Pattern
+
+File theDecodeApk
+
+
+buildscript {
+    repositories {
+        google()
+        jcenter()
+
+    }
+    dependencies {
+        classpath 'org.codehaus.groovy:groovy-all:2.3.11'
+        classpath 'com.seekting:gradle-utils:1.0.3'
+//        classpath 'com.seekting:AlgorithmLib:1.0.8'
+//        classpath fileTree(dir: 'templib', include: '*.jar')
+        classpath fileTree(dir: 'libs', include: '*.jar')
+    }
+}
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}
+
+
+
+task hello {
+    doLast {
+        def apkDir = new File("apk")
+        def files = apkDir.listFiles()
+        theDecodeApk
+        File theMapping
+        if (files.length <= 0) {
+
+            LogSupportExtension.logI("apk目录下没有包名")
+            return
+        } else if (files.length > 1) {
+            LogSupportExtension.logI("apk目录下超过多个包名请选择需要检测的包名序号:(0到${files.length - 1})")
+            for (int i = 0; i < files.length; i++) {
+                LogSupportExtension.logI("${i}.${files[i].name}")
+            }
+            Scanner scanner = new Scanner(System.in)
+            int theIndex = 0
+            while (scanner.hasNext()) {
+                int index = scanner.nextInt()
+                if (index >= 0 && index < files.length) {
+                    theIndex = index
+                    LogSupportExtension.logI("你选择的是$theIndex:${files[theIndex]}")
+                    break
+                } else {
+                    LogSupportExtension.logW("请输入0到${files.length - 1}")
+                }
+            }
+            theDecodeApk = files[theIndex]
+        } else {
+            theDecodeApk = files[0]
+        }
+//        java -jar "tool/apktool_2.3.3.jar" d -r -f -o "build/ApkDecode" "apk/qian_2018_04_26_19_30_33_1.0.apk"
+        LogSupportExtension.logI("要反编译的文件为:${theDecodeApk.name}")
+        def fileName = theDecodeApk.name.substring(0, theDecodeApk.name.indexOf('.'))
+        theMapping = new File("map/${fileName}.mapping")
+
+        LogSupportExtension.logI("对应的map文件为${theMapping.name}")
+        if (!theMapping.exists()) {
+            LogSupportExtension.logE("mapping文件不存在:   ${theMapping}")
+        }
+        LogSupportExtension.logI("开始反编译${theDecodeApk.name}")
+
+//        exec {
+//            def cmd = ["java", '-jar', 'tool/apktool_2.3.3.jar', 'd', '-r', '-f', '-o', "${rootProject.buildDir}/${theDecodeApk.name}", "apk/${theDecodeApk.name}"]
+//            workingDir = rootDir.absolutePath
+//            commandLine cmd
+//        }
+
+        File dir = new File("build/${theDecodeApk.name}")
+        List<String> list = new ArrayList<String>()
+        list.add("getDeviceId()")
+        list.add("AppCompatActivity;->onCreate(Landroid/os/Bundle;")
+        dumpFile(dir, list)
+        LogSupportExtension.logI("dump结束!")
+
+    }
+}
+
+
+ext {
+    LINE_PATTERN = Pattern.compile("(?<=.line ).*")
+    METHOD_PATTERN = Pattern.compile("(?<=.method ).*(?=\\()")
+}
+
+def dumpFile(File root, List<String> keys) {
+
+    String SMALI_BEGIN = "smali\\"
+    String SMALI_END = ".smali"
+    if (root.isDirectory()) {
+        def list = root.listFiles()
+        for (File f : list) {
+            dumpFile(f, keys)
+        }
+    } else {
+        FileReader fileReader = new FileReader(root)
+        String line
+        int begin = root.path.indexOf(SMALI_BEGIN) + SMALI_BEGIN.length()
+        int end = root.path.length() - SMALI_END.length()
+        String className = root.path.substring(begin, end)
+
+        String lineNum = ""
+        String methodName = ""
+        while ((line = fileReader.readLine()) != null) {
+
+
+            if (line.contains(".line")) {
+
+                Matcher matcher = (ext.LINE_PATTERN).matcher(line)
+                if (matcher.find()) {
+                    lineNum = matcher.group()
+                }
+
+            } else if (line.contains(".method")) {
+                Matcher matcher = (ext.METHOD_PATTERN).matcher(line)
+                if (matcher.find()) {
+                    methodName = matcher.group()
+                }
+
+            } else {
+                for (String key : keys) {
+                    if (line.contains(key)) {
+                        LogSupportExtension.logW("$className.$methodName:$lineNum \n发现一行:${line} 命中:${key}")
+                    }
+                }
+            }
+        }
+
+    }
+}
+//task decode() {
+//    doLast {
+//
+//        exec {
+//            def cmd = ["java", '-jar', 'tool/apktool_2.3.3.jar', 'd', '-r', '-f', '-o', "${rootProject.buildDir}/${theDecodeApk.name}", "apk/${theDecodeApk.name}"]
+//            workingDir = rootDir.absolutePath
+//            commandLine cmd
+//        }
+//    }
+//
+//}
