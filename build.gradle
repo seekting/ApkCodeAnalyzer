@@ -1,10 +1,55 @@
 import com.seekting.gradle.unitls.LogSupportExtension
 
+import java.text.SimpleDateFormat
 import java.util.regex.Matcher
 import java.util.regex.Pattern
 
 File theDecodeApk
+File theMapping
 
+class WhiteData {
+    private static final WHITE_METHOD_PATTERN = Pattern.compile("(?<=#).*(?=\\(\\))")
+    private static final WHITE_CLASS_PATTERN = Pattern.compile(".*(?=#)")
+    private static final WHITE_METHOD_PATTERN_1 = Pattern.compile("(?<=#).*")
+    String className
+    String methodName
+
+    static WhiteData obtain(String line) {
+        WhiteData result = new WhiteData()
+        if (!line.contains('#')) {
+            result.className = line
+            println("className=$result.className")
+            return result
+
+        }
+
+        def matcher = WHITE_CLASS_PATTERN.matcher(line)
+        if (matcher.find()) {
+            result.className = matcher.group()
+        }
+        if (line.contains("(")) {
+            matcher = WHITE_METHOD_PATTERN.matcher(line)
+            if (matcher.find()) {
+                result.methodName = matcher.group()
+            }
+        } else {
+            matcher = WHITE_METHOD_PATTERN_1.matcher(line)
+            if (matcher.find()) {
+                result.methodName = matcher.group()
+            }
+        }
+
+        return result
+    }
+
+    @Override
+    public String toString() {
+        return "WhiteData{" +
+                "className='" + className + '\'' +
+                ", methodName='" + methodName + '\'' +
+                '}';
+    }
+}
 
 buildscript {
     repositories {
@@ -26,40 +71,24 @@ task clean(type: Delete) {
 
 
 
-task hello {
+task search {
     doLast {
         def apkDir = new File("apk")
         def files = apkDir.listFiles()
         theDecodeApk
-        File theMapping
         if (files.length <= 0) {
 
             LogSupportExtension.logI("apk目录下没有包名")
             return
         } else if (files.length > 1) {
             LogSupportExtension.logI("apk目录下超过多个包名请选择需要检测的包名序号:(0到${files.length - 1})")
-            for (int i = 0; i < files.length; i++) {
-                LogSupportExtension.logI("${i}.${files[i].name}")
-            }
-            Scanner scanner = new Scanner(System.in)
-            int theIndex = 0
-            while (scanner.hasNext()) {
-                int index = scanner.nextInt()
-                if (index >= 0 && index < files.length) {
-                    theIndex = index
-                    LogSupportExtension.logI("你选择的是$theIndex:${files[theIndex]}")
-                    break
-                } else {
-                    LogSupportExtension.logW("请输入0到${files.length - 1}")
-                }
-            }
-            theDecodeApk = files[theIndex]
+            theDecodeApk = selectFile(files)
         } else {
             theDecodeApk = files[0]
         }
 //        java -jar "tool/apktool_2.3.3.jar" d -r -f -o "build/ApkDecode" "apk/qian_2018_04_26_19_30_33_1.0.apk"
         LogSupportExtension.logI("要反编译的文件为:${theDecodeApk.name}")
-        def fileName = theDecodeApk.name.substring(0, theDecodeApk.name.indexOf('.'))
+        def fileName = theDecodeApk.name.substring(0, theDecodeApk.name.lastIndexOf('.'))
         theMapping = new File("map/${fileName}.mapping")
 
         LogSupportExtension.logI("对应的map文件为${theMapping.name}")
@@ -67,18 +96,49 @@ task hello {
             LogSupportExtension.logE("mapping文件不存在:   ${theMapping}")
         }
         LogSupportExtension.logI("开始反编译${theDecodeApk.name}")
+        def decodeDirStr = "${rootProject.buildDir}/${theDecodeApk.name}"
+        File decodeDir = new File(decodeDirStr)
 
-//        exec {
-//            def cmd = ["java", '-jar', 'tool/apktool_2.3.3.jar', 'd', '-r', '-f', '-o', "${rootProject.buildDir}/${theDecodeApk.name}", "apk/${theDecodeApk.name}"]
-//            workingDir = rootDir.absolutePath
-//            commandLine cmd
-//        }
+
+        if (!decodeDir.exists()) {
+            exec {
+                def cmd = ["java", '-jar', 'tool/apktool_2.3.3.jar', 'd', '-r', '-f', '-o', decodeDir, "apk/${theDecodeApk.name}"]
+                workingDir = rootDir.absolutePath
+                commandLine cmd
+            }
+        } else {
+            LogSupportExtension.logI("有反编译文件夹,略过反编译!")
+        }
 
         File dir = new File("build/${theDecodeApk.name}")
-        List<String> list = new ArrayList<String>()
-        list.add("getDeviceId()")
-        list.add("AppCompatActivity;->onCreate(Landroid/os/Bundle;")
-        dumpFile(dir, list)
+        File theSearchFile = new File("searchlist/${fileName}.properties")
+        prepareSearchList(theSearchFile)
+        if (SEARCHLIST.size() == 0) {
+            LogSupportExtension.logE("seach list size=0,不需停止搜索")
+            return
+        }
+        File theWhiteFile = new File("whitelist/${fileName}.properties")
+        prepareWhiteList(theWhiteFile)
+        prepareMap(theMapping)
+        List<String> result = new ArrayList<>()
+        File[] ffiles = dir.listFiles()
+        for (d in ffiles) {
+            if (d.isDirectory() && d.name.indexOf("smali") >= 0) {
+                LogSupportExtension.logE("开始检查目录${d.path}")
+                dumpFile(d.name, d, SEARCHLIST as List<String>, result)
+            }
+        }
+
+
+        String time = SIMPLEDATEFORMAT.format(new Date())
+        File resultFile = new File("result/${time}_${fileName}.list")
+        FileWriter fileWriter = new FileWriter(resultFile)
+        for (s in result) {
+            fileWriter.write(s)
+            fileWriter.write("\n")
+
+        }
+        fileWriter.close()
         LogSupportExtension.logI("dump结束!")
 
     }
@@ -88,21 +148,200 @@ task hello {
 ext {
     LINE_PATTERN = Pattern.compile("(?<=.line ).*")
     METHOD_PATTERN = Pattern.compile("(?<=.method ).*(?=\\()")
+
+    Mapping = new HashMap<String, HashMap<String, String>>()
+
+    CLASS_MAPPING_PATTERN = Pattern.compile(".*->.*:")
+    CLASS_MAPPING_VALUE_PATTERN = Pattern.compile(".*(?= ->)")
+    CLASS_MAPPING_KEY_PATTERN = Pattern.compile("(?<=-> ).*(?=:)")
+    METHOD_MAPPING_PATTERN = Pattern.compile("[0-9]*:[0-9]*:.*->")
+    METHOD_MAPPING_KEY_PATTERN = Pattern.compile("(?<=-> ).*")
+    METHOD_MAPPING_VALUE_PATTERN = Pattern.compile("(?<= ).*\\(")
+    METHOD_MAPPING_LINE_PATTERN = Pattern.compile("[a-zA-Z0-9]{1,}(?=\\()")
+
+
+    FIELD_MAPPING_KEY_PATTERN = Pattern.compile("(?<=-> ).*")
+    FIELD_MAPPING_VALUE_PATTERN = Pattern.compile("[\\w].*(?= ->)")
+    SEARCHLIST = new ArrayList<String>()
+    WHITELIST = new ArrayList<WhiteData>()
+    SIMPLEDATEFORMAT = new SimpleDateFormat("yyyy_MM_dd_HH_mm_ss")
+
+
 }
 
-def dumpFile(File root, List<String> keys) {
+File selectFile(File[] files) {
+    for (int i = 0; i < files.length; i++) {
+        LogSupportExtension.logI("${i}.${files[i].name}")
+    }
+    Scanner scanner = new Scanner(System.in)
+    int theIndex = 0
+    while (scanner.hasNext()) {
+        int index = scanner.nextInt()
+        if (index >= 0 && index < files.length) {
+            theIndex = index
+            LogSupportExtension.logI("你选择的是$theIndex:${files[theIndex]}")
+            break
+        } else {
+            LogSupportExtension.logW("请输入0到${files.length - 1}")
+        }
+    }
+    return files[theIndex]
+}
 
-    String SMALI_BEGIN = "smali\\"
+void prepareSearchList(File theSearchList) {
+    if (!theSearchList.exists()) {
+        LogSupportExtension.logW("没有找到searchList文件$theSearchList")
+        File parent = theSearchList.getParentFile()
+        File[] files = parent.listFiles()
+        if (files.length == 1) {
+            theSearchList = files[0]
+            LogSupportExtension.logW("使用search目录里的默认文件${files[0]}")
+        } else {
+            LogSupportExtension.logI("请选择search list文件:")
+            theSearchList = selectFile(files)
+        }
+    }
+
+    FileReader fileReader = new FileReader(theSearchList)
+    String line
+    while ((line = fileReader.readLine()) != null) {
+        if (line.isEmpty()) {
+            continue
+        }
+        if (line.charAt(0) != '#') {
+            ext.SEARCHLIST.add(line)
+        }
+    }
+    fileReader.close()
+}
+
+void prepareWhiteList(File theWhiteList) {
+    if (!theWhiteList.exists()) {
+        LogSupportExtension.logW("没有找到WhiteList文件$theWhiteList")
+        File parent = theWhiteList.getParentFile()
+        File[] files = parent.listFiles()
+        if (files.length == 1) {
+            theWhiteList = files[0]
+            LogSupportExtension.logW("使用whitelist目录里的默认文件${files[0]}")
+        } else {
+            LogSupportExtension.logI("请选择white list文件:")
+            theWhiteList = selectFile(files)
+        }
+    }
+    FileReader fileReader = new FileReader(theWhiteList)
+    String line
+    while ((line = fileReader.readLine()) != null) {
+        if (line.isEmpty()) {
+            continue
+        }
+        if (line.charAt(0) != '#') {
+            WhiteData whiteData = WhiteData.obtain(line)
+            LogSupportExtension.logI("whiteData$whiteData")
+            ext.WHITELIST.add(whiteData)
+        }
+    }
+    fileReader.close()
+}
+
+void prepareMap(File theMapping) {
+    if (!theMapping.exists()) {
+        LogSupportExtension.logW("没有找到map文件$theMapping")
+        File parent = theMapping.getParentFile()
+        File[] files = parent.listFiles()
+        if (files.length == 1) {
+            theMapping = files[0]
+            LogSupportExtension.logW("使用map目录里的默认文件${files[0]}")
+        } else {
+            LogSupportExtension.logI("请选择map文件:")
+            theMapping = selectFile(files)
+        }
+    }
+
+
+
+    FileReader fileReader = new FileReader(theMapping)
+    String line
+    String classKey
+    String classValue
+    String filedKey
+    String filedType
+    String filedValue
+    String methodKey
+    String methodValue
+    HashMap<String, String> classMap
+    while ((line = fileReader.readLine()) != null) {
+        if (line.isEmpty()) {
+            continue
+        }
+//        LogSupportExtension.logI("line=$line")
+        if (ext.CLASS_MAPPING_PATTERN.matcher(line).find()) {
+            classMap = new HashMap<>()
+            def matcher = ext.CLASS_MAPPING_KEY_PATTERN.matcher(line)
+            if (matcher.find()) {
+                classKey = matcher.group()
+//                LogSupportExtension.logI("classKey=$classKey")
+
+            }
+            matcher = ext.CLASS_MAPPING_VALUE_PATTERN.matcher(line)
+            if (matcher.find()) {
+                classValue = matcher.group()
+//                LogSupportExtension.logI("classValue=$classValue")
+            }
+            classMap.put(classKey, classValue)
+            Mapping.put(classKey, classMap)
+        } else if (line.contains(") ->")) {
+            def matcher = ext.METHOD_MAPPING_LINE_PATTERN.matcher(line)
+            if (matcher.find()) {
+
+                methodValue = matcher.group()
+
+
+                matcher = ext.METHOD_MAPPING_KEY_PATTERN.matcher(line)
+                if (matcher.find()) {
+                    methodKey = matcher.group()
+//                    LogSupportExtension.logI("methodKey=$methodKey")
+                }
+                classMap.put(methodKey, methodValue)
+            }
+
+        } else {
+            //成员变量
+
+//            def matcher = ext.FIELD_MAPPING_VALUE_PATTERN.matcher(line)
+//            if (matcher.find()) {
+//                filedValue = matcher.group()
+//                def values = filedValue.split(" ")
+//                filedType = values[0]
+//                filedValue = values[1]
+//
+//                LogSupportExtension.logI("filedValue=$filedValue")
+//                LogSupportExtension.logI("filedType=$filedType")
+//            }
+//            matcher = ext.FIELD_MAPPING_KEY_PATTERN.matcher(line)
+//            if (matcher.find()) {
+//                filedKey = matcher.group()
+//                LogSupportExtension.logI("filedKey=$filedKey")
+//            }
+        }
+
+    }
+    fileReader.close()
+
+}
+
+def dumpFile(String SMALI_BEGIN, File root, List<String> keys, List<String> results) {
+
+
     String SMALI_END = ".smali"
     if (root.isDirectory()) {
         def list = root.listFiles()
         for (File f : list) {
-            dumpFile(f, keys)
+            dumpFile(SMALI_BEGIN, f, keys, results)
         }
     } else {
         FileReader fileReader = new FileReader(root)
         String line
-        int begin = root.path.indexOf(SMALI_BEGIN) + SMALI_BEGIN.length()
+        int begin = root.path.indexOf(SMALI_BEGIN) + SMALI_BEGIN.length() + 1
         int end = root.path.length() - SMALI_END.length()
         String className = root.path.substring(begin, end)
 
@@ -111,6 +350,9 @@ def dumpFile(File root, List<String> keys) {
         while ((line = fileReader.readLine()) != null) {
 
 
+            if (line.isEmpty()) {
+                continue
+            }
             if (line.contains(".line")) {
 
                 Matcher matcher = (ext.LINE_PATTERN).matcher(line)
@@ -126,13 +368,48 @@ def dumpFile(File root, List<String> keys) {
 
             } else {
                 for (String key : keys) {
-                    if (line.contains(key)) {
-                        LogSupportExtension.logW("$className.$methodName:$lineNum \n发现一行:${line} 命中:${key}")
+                    boolean containss = line.contains(key)
+                    if (containss) {
+
+                        className = className.replace('\\', '.')
+//                        LogSupportExtension.logE("key=$key,className=$className")
+                        def methodList = methodName.split(" ")
+                        methodName = methodList[methodList.length - 1]
+                        HashMap<String, String> map = Mapping.get(className)
+                        if (map != null) {
+                            String mappingMethodName = map.get(methodName)
+                            String mappingClassName = map.get(className)
+//                            LogSupportExtension.logE("mappingClassName=$mappingClassName, className=$className")
+//                            LogSupportExtension.logE("mappingMethodName=$mappingMethodName, methodName=$methodName")
+                            boolean isInWhiteList = false
+
+                            for (whiteData in ext.WHITELIST) {
+                                boolean classNameContains = mappingClassName.contains(whiteData.className)
+                                boolean methodNameContains = whiteData.methodName == null || mappingMethodName.contains(whiteData.methodName)
+//                                LogSupportExtension.logE("$classNameContains ,$methodNameContains")
+                                boolean contains = classNameContains && methodNameContains
+                                if (contains) {
+                                    isInWhiteList = true
+                                    break
+                                }
+                            }
+                            if (!isInWhiteList) {
+                                String lineNumns
+                                if (lineNum.isEmpty()) {
+                                    lineNumns = ""
+                                } else {
+                                    lineNumns = "#$lineNum"
+                                }
+                                String result = "$mappingClassName.$mappingMethodName($lineNumns)[$key]"
+                                results.add(result)
+                                LogSupportExtension.logE(result)
+                            }
+                        }
                     }
                 }
             }
         }
-
+        fileReader.close()
     }
 }
 //task decode() {
