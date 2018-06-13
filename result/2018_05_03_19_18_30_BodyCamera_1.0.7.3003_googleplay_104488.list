@@ -1,6 +1,0 @@
-com.magic.module.sdk.e.b.c.a(#108)[Landroid/net/wifi/WifiInfo;->getMacAddress()Ljava/lang/String]
-com.mopub.common.ClientMetadata.getDeviceIdFromContext(#227)[Landroid/provider/Settings$Secure;->getString(Landroid/content/ContentResolver;Ljava/lang/String;)Ljava/lang/String]
-com.mopub.common.ClientMetadata.setAmazonAdvertisingInfo(#206)[Landroid/provider/Settings$Secure;->getString(Landroid/content/ContentResolver;Ljava/lang/String;)Ljava/lang/String]
-com.qihoo360.mobilesafe.core.load.LoadProcessSituationFilter.initCurrentInputMethod(#1078)[Landroid/provider/Settings$Secure;->getString(Landroid/content/ContentResolver;Ljava/lang/String;)Ljava/lang/String]
-com.qihoo360.mobilesafe.telephonydefault.PhoneCard.getIMEI(#107)[Landroid/telephony/TelephonyManager;->getDeviceId()Ljava/lang/String]
-com.qihoo360.mobilesafe.telephonydefault.PhoneCard.getIMSI(#117)[Landroid/telephony/TelephonyManager;->getSubscriberId()Ljava/lang/String]
