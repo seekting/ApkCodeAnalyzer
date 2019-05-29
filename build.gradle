@@ -251,6 +251,9 @@ void prepareMap(File theMapping) {
         if (files.length == 1) {
             theMapping = files[0]
             LogSupportExtension.logW("使用map目录里的默认文件${files[0]}")
+        } else if (files.length == 0) {
+            return
+
         } else {
             LogSupportExtension.logI("请选择map文件:")
             theMapping = selectFile(files)
@@ -376,34 +379,33 @@ def dumpFile(String SMALI_BEGIN, File root, List<String> keys, List<String> resu
                         def methodList = methodName.split(" ")
                         methodName = methodList[methodList.length - 1]
                         HashMap<String, String> map = Mapping.get(className)
-                        if (map != null) {
-                            String mappingMethodName = map.get(methodName)
-                            String mappingClassName = map.get(className)
+
+                        String mappingMethodName = map == null ? methodName : map.get(methodName)
+                        String mappingClassName = map == null ? className : map.get(className)
 //                            LogSupportExtension.logE("mappingClassName=$mappingClassName, className=$className")
 //                            LogSupportExtension.logE("mappingMethodName=$mappingMethodName, methodName=$methodName")
-                            boolean isInWhiteList = false
+                        boolean isInWhiteList = false
 
-                            for (whiteData in ext.WHITELIST) {
-                                boolean classNameContains = mappingClassName.contains(whiteData.className)
-                                boolean methodNameContains = whiteData.methodName == null || mappingMethodName.contains(whiteData.methodName)
+                        for (whiteData in ext.WHITELIST) {
+                            boolean classNameContains = mappingClassName.contains(whiteData.className)
+                            boolean methodNameContains = whiteData.methodName == null || mappingMethodName.contains(whiteData.methodName)
 //                                LogSupportExtension.logE("$classNameContains ,$methodNameContains")
-                                boolean contains = classNameContains && methodNameContains
-                                if (contains) {
-                                    isInWhiteList = true
-                                    break
-                                }
+                            boolean contains = classNameContains && methodNameContains
+                            if (contains) {
+                                isInWhiteList = true
+                                break
                             }
-                            if (!isInWhiteList) {
-                                String lineNumns
-                                if (lineNum.isEmpty()) {
-                                    lineNumns = ""
-                                } else {
-                                    lineNumns = "#$lineNum"
-                                }
-                                String result = "$mappingClassName.$mappingMethodName($lineNumns)[$key]"
-                                results.add(result)
-                                LogSupportExtension.logE(result)
+                        }
+                        if (!isInWhiteList) {
+                            String lineNumns
+                            if (lineNum.isEmpty()) {
+                                lineNumns = ""
+                            } else {
+                                lineNumns = "#$lineNum"
                             }
+                            String result = "$mappingClassName.$mappingMethodName($lineNumns)[$key]"
+                            results.add(result)
+                            LogSupportExtension.logE(result)
                         }
                     }
                 }
